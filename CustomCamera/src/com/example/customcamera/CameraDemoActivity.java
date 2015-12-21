@@ -1,39 +1,36 @@
 package com.example.customcamera;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.sql.Timestamp;
-import java.util.ArrayList;
 import java.util.List;
 
+import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.AlertDialog.Builder;
-import android.content.ComponentName;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
-import android.graphics.Bitmap.CompressFormat;
 import android.graphics.BitmapFactory;
-import android.graphics.Matrix;
 import android.hardware.Camera;
 import android.hardware.Camera.CameraInfo;
 import android.hardware.Camera.ErrorCallback;
 import android.hardware.Camera.Parameters;
 import android.hardware.Camera.PictureCallback;
-import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.provider.MediaStore.Images;
 import android.util.Log;
 import android.view.ContextThemeWrapper;
-import android.view.GestureDetector;
 import android.view.GestureDetector.OnGestureListener;
 import android.view.MotionEvent;
 import android.view.Surface;
@@ -42,47 +39,37 @@ import android.view.SurfaceHolder.Callback;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.View.OnClickListener;
-import android.view.ViewGroup.LayoutParams;
 import android.view.WindowManager;
-import android.widget.Button;
-import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.Toast;
 
-public class CameraDemoActivity extends Activity implements CameraCallback, Callback,
+@TargetApi(Build.VERSION_CODES.GINGERBREAD) public class CameraDemoActivity extends Activity implements CameraCallback, Callback,
 		OnClickListener, OnGestureListener {
 
-	 private int currentColorEffect = 0;
-     private int currentWhiteBalance = 0;
+	private int currentColorEffect = 0;
+    private int currentWhiteBalance = 0;
 	private SurfaceView surfaceView;
 	private SurfaceHolder surfaceHolder;
 	private Camera camera;
 	private ImageView flipCamera;
-	 private GestureDetector gesturedetector = null;
 	private ImageView flashCameraButton;
 	private ImageView captureImage;
 	private int cameraId;
 	private boolean flashmode = false;
 	private int rotation;
 	public static File imageViewFile;
-	private static final int PICK_FROM_CAMERA = 1;
-	private static final int CROP_FROM_CAMERA = 2;
-	private static final int PICK_FROM_FILE = 3;
-	private Uri mImageCaptureUri,picUri;
 	private ImageView picImage;
 	private ImageView whitebalance,effects;
-	private FrameLayout cameraholder;
-	
-	 private CameraCallback callback = null;
-     private String[] supportedColorEffects = null;
-     private String[] supportedWhiteBalances = null;
+	public static final String CROP_VERSION_SELECTED_KEY = "crop";
+	public static final int VERSION_1 = 1;
+	public static final int VERSION_2 = 2;
+    private String[] supportedColorEffects = null;
+    private String[] supportedWhiteBalances = null;
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.camerademo_activity);
 		// camera surface view created
-		cameraId = CameraInfo.CAMERA_FACING_BACK;
-		cameraholder = (FrameLayout) findViewById(R.id.cameraholder);
 		flipCamera = (ImageView) findViewById(R.id.flipCamera);
 		flashCameraButton = (ImageView) findViewById(R.id.flash);
 		captureImage = (ImageView) findViewById(R.id.captureImage);
@@ -121,14 +108,8 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 		releaseCamera();
 		try {
 			camera = Camera.open(cameraId);
-		            camera.setPreviewDisplay(surfaceHolder);
-		            camera.setPreviewCallback(new Camera.PreviewCallback() {
-		                    @Override
-		                    public void onPreviewFrame(byte[] data, Camera camera) {
-		                            if(null != callback) callback.onPreviewFrame(data, camera);
-		                    }
-		            });
-		            
+			List<Camera.Size> supportedSizes;
+					
 		            final List<String> coloreffects = camera.getParameters().getSupportedColorEffects();
 		            final List<String> whiteBalances = camera.getParameters().getSupportedWhiteBalance();
 		            
@@ -137,12 +118,36 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 		            
 		            coloreffects.toArray(supportedColorEffects);
 		            whiteBalances.toArray(supportedWhiteBalances);
+		            Camera.Parameters params = camera.getParameters();
+
+		            supportedSizes = params.getSupportedPictureSizes();
+					for (Camera.Size sz : supportedSizes) {
+						setPictureSize(sz.width, sz.height);
+						Log.d("camera size", "supportedPictureSizes " + sz.width + "x" + sz.height);
+						break;
+					}
+		            List<String> flashModes = params.getSupportedFlashModes();
+		            if (flashModes.size() > 0)
+		                params.setFlashMode(Camera.Parameters.FLASH_MODE_AUTO);
+
+		            // Action mode take pictures of fast moving objects
+		            List<String> sceneModes = params.getSupportedSceneModes();
+		            if (sceneModes.contains(Camera.Parameters.SCENE_MODE_ACTION))
+		                params.setSceneMode(Camera.Parameters.SCENE_MODE_ACTION);
+		            else
+		                params.setSceneMode(Camera.Parameters.SCENE_MODE_AUTO);
+
+		            // if you choose FOCUS_MODE_AUTO remember to call autoFocus() on
+		            // the Camera object before taking a picture 
+		            params.setFocusMode(Camera.Parameters.FOCUS_MODE_FIXED);
 		            
+		            camera.setParameters(params);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
 		if (camera != null) {
 			try {
+				Log.d("camera", "not null");
 				setUpCamera(camera);
 				camera.setErrorCallback(new ErrorCallback() {
 
@@ -163,6 +168,7 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 		return result;
 	}
 
+	@SuppressLint("InlinedApi") 
 	private void setUpCamera(Camera c) {
 		Camera.CameraInfo info = new Camera.CameraInfo();
 		Camera.getCameraInfo(cameraId, info);
@@ -196,20 +202,25 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 		}
 		c.setDisplayOrientation(rotation);
 		Parameters params = c.getParameters();
-
+		
 		showFlashButton(params);
-
+		
 		List<String> focusModes = params.getSupportedFlashModes();
 		if (focusModes != null) {
 			if (focusModes
 					.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
-				params.setFlashMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+				params.setFlashMode(Parameters.FLASH_MODE_AUTO);
+			    params.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
 			}
 		}
-
 		params.setRotation(rotation);
 	}
 
+	private void setPictureSize(int width, int height) {
+		Camera.Parameters params = camera.getParameters();
+		params.setPictureSize(width, height);
+		camera.setParameters(params);
+	}
 	private void showFlashButton(Parameters params) {
 		boolean showFlash = (getPackageManager().hasSystemFeature(
 				PackageManager.FEATURE_CAMERA_FLASH) && params.getFlashMode() != null)
@@ -220,16 +231,7 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 				: View.INVISIBLE);
 
 	}
-	 /*private void setupPictureMode(){
-	        camerasurface = new CameraSurface(this);
-	        
-	        cameraholder.addView(camerasurface, new LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT));
-	        
-	        camerasurface.setCallback(this);
-	    }*/
-	  public void setCallback(CameraCallback callback){
-          this.callback = callback;
-  }
+  
 	private void releaseCamera() {
 		try {
 			if (camera != null) {
@@ -246,25 +248,25 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 		}
 	}
 
-	@Override
+	@TargetApi(Build.VERSION_CODES.GINGERBREAD) @SuppressLint("InlinedApi") @Override
 	public void surfaceChanged(SurfaceHolder holder, int format, int width,
 			int height) {
-
+		Log.d("Id", String.valueOf(cameraId));
+		int id = (cameraId == CameraInfo.CAMERA_FACING_BACK ? CameraInfo.CAMERA_FACING_FRONT
+				: CameraInfo.CAMERA_FACING_BACK);
+		Log.d("CameraId :", String.valueOf(id));
+		openCamera(id);
 	}
 
 	@Override
 	public void surfaceDestroyed(SurfaceHolder holder) {
-
+		if (camera != null) {
+			camera.stopPreview();
+			camera.release();
+		}
+		camera = null;
 	}
-	private SurfaceHolder holder;
-	 private void initialize() {
-         holder = new SurfaceView(getBaseContext()).getHolder();
-         
-         holder.addCallback(this);
-         holder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
-         
-         gesturedetector = new GestureDetector(this);
- }
+	
 	@Override
 	public void onClick(View v) {
 		switch (v.getId()) {
@@ -287,14 +289,7 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 			break;
 		}
 	}
-	 private void setupPictureMode(){
-		 
-		//initialize();
-		//cameraholder.removeAllViews();
-	        cameraholder.addView(surfaceView, new LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT));
-	        
-	        setCallback(this);
-	    }
+	
 	private void takeImage() {
 		camera.takePicture(null, null, new PictureCallback() {
 
@@ -303,17 +298,6 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 			@Override
 			public void onPictureTaken(byte[] data, Camera camera) {
 				try {
-					// convert byte array into bitmap
-					Bitmap loadedImage = null;
-					Bitmap rotatedBitmap = null;
-					loadedImage = BitmapFactory.decodeByteArray(data, 0,
-							data.length);
-					// rotate Image
-					Matrix rotateMatrix = new Matrix();
-					//rotateMatrix.postRotate(rotation);
-					rotatedBitmap = Bitmap.createBitmap(loadedImage, 0, 0,
-							loadedImage.getWidth(), loadedImage.getHeight(),
-							rotateMatrix, false);
 					String state = Environment.getExternalStorageState();
 					File folder = null;
 					if (state.contains(Environment.MEDIA_MOUNTED)) {
@@ -342,14 +326,23 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 						return;
 					}
 
-					ByteArrayOutputStream ostream = new ByteArrayOutputStream();
+			        if (imageFile == null) {
+			            Log.d("Camera Error", "Error creating media file, check storage permissions : PICTURE FILE IS NULL");
+			            return;
+			        }
+
+			        try {
+			            FileOutputStream fos = new FileOutputStream(imageFile);
+			            fos.write(data);
+			            fos.close();
+			            finish();
+			        } catch (FileNotFoundException e) {
+			            Log.d("Camera Error", "File not found: " + e.getMessage());
+			        } catch (IOException e) {
+			            Log.d("Camera Error", "Error accessing file: " + e.getMessage());
+			        }
 					
-					// save image into gallery
-					rotatedBitmap.compress(CompressFormat.JPEG, 100, ostream);
-					FileOutputStream fout = new FileOutputStream(imageFile);
-					fout.write(ostream.toByteArray());
-					fout.close();
-					ContentValues values = new ContentValues();
+			        ContentValues values = new ContentValues();
 					values.put(Images.Media.DATE_TAKEN,
 							System.currentTimeMillis());
 					values.put(Images.Media.MIME_TYPE, "image/jpeg");
@@ -358,6 +351,8 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 
 					CameraDemoActivity.this.getContentResolver().insert(
 						Images.Media.EXTERNAL_CONTENT_URI, values);
+
+					
 					imageViewFile = imageFile;
 					Log.e("image path:", imageViewFile.getAbsolutePath());
 					flipCamera.setVisibility(View.INVISIBLE);
@@ -369,16 +364,14 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 					picImage.setVisibility(View.VISIBLE);
 					 if(imageFile.exists()){
 
-				        	//mImageCaptureUri = CameraSurface.imageFilename.getAbsolutePath();
+				      Intent intent = new Intent(CameraDemoActivity.this, CropActivity.class);
+				      intent.putExtra(CROP_VERSION_SELECTED_KEY, VERSION_1);
+				      intent.putExtra("status", imageFile.getAbsolutePath());
+				      startActivity(intent);
 				            Bitmap myBitmap = BitmapFactory.decodeFile(imageFile.getAbsolutePath());
-
 				            picImage.setImageBitmap(myBitmap);
+
 					 }
-					// Intent i = new Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
-					 mImageCaptureUri = Uri.fromFile(imageFile);
-				    // intent.putExtra(MediaStore.EXTRA_OUTPUT, mImageCaptureUri);
-					startActivityForResult(new Intent(), CROP_FROM_CAMERA);
-					//startActivity(new Intent(CameraDemoActivity.this, ViewImageFile.class));
 				} catch (Exception e) {
 					e.printStackTrace();
 				}
@@ -392,6 +385,18 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 				: CameraInfo.CAMERA_FACING_BACK);
 		if (!openCamera(id)) {
 			alertCameraDialog();
+		}
+		else{
+			List<Camera.Size> supportedSizes;
+			Camera.Parameters params = camera.getParameters();
+
+            supportedSizes = params.getSupportedPictureSizes();
+			for (Camera.Size sz : supportedSizes) {
+				setPictureSize(sz.width, sz.height);
+				Log.d("camera size", "supportedPictureSizes " + sz.width + "x" + sz.height);
+				break;
+			}
+
 		}
 	}
 
@@ -428,7 +433,7 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
          return supportedWhiteBalances;
  }
  
- public void setColorEffect(int effect){
+ @SuppressLint("InlinedApi") public void setColorEffect(int effect){
          Camera.Parameters parameters = camera.getParameters();
          
          parameters.setColorEffect(supportedColorEffects[effect]);
@@ -462,7 +467,7 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
 		dialog.show();
 	}
 
-	private Builder createAlert(Context context, String title, String message) {
+	@SuppressLint("InlinedApi") private Builder createAlert(Context context, String title, String message) {
 
 		AlertDialog.Builder dialog = new AlertDialog.Builder(
 				new ContextThemeWrapper(context,
@@ -500,7 +505,7 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
     builder.setTitle(getString(R.string.color_effect));
     builder.setSingleChoiceItems(getSupportedColorEffects(), 
                     getCurrentColorEffect(), new DialogInterface.OnClickListener() {
-                    @Override
+                    @SuppressLint("InlinedApi") @Override
                     public void onClick(DialogInterface dialog, int which) {
                             setColorEffect(which);
                             
@@ -511,109 +516,6 @@ public class CameraDemoActivity extends Activity implements CameraCallback, Call
     builder.show();
     }
 
-	private void doCrop() {
-		final ArrayList<CropOption> cropOptions = new ArrayList<CropOption>();
-    	
-    	Intent intent = new Intent("com.android.camera.action.CROP");
-        intent.setType("image/*");
-        
-        List<ResolveInfo> list = getPackageManager().queryIntentActivities( intent, 0 );
-        
-        int size = list.size();
-        
-        if (size == 0) {	        
-        	Toast.makeText(this, "Can not find image crop app", Toast.LENGTH_SHORT).show();
-        	
-            return;
-        } else {
-        	intent.setData(mImageCaptureUri);
-            
-            intent.putExtra("outputX", 400);
-            intent.putExtra("outputY", 400);
-            intent.putExtra("aspectX", 1);
-            intent.putExtra("aspectY", 1);
-            intent.putExtra("scale", true);
-            intent.putExtra("return-data", true);
-            Log.e("Size",String.valueOf(size));
-        	if (size == 1) {
-        		Intent i 		= new Intent(intent);
-	        	ResolveInfo res	= list.get(0);
-	        	 Log.e("From Camera", "croping");
-	        	i.setComponent( new ComponentName(res.activityInfo.packageName, res.activityInfo.name));
-	        	
-	        	startActivityForResult(i, CROP_FROM_CAMERA);
-        	} else {
-		        for (ResolveInfo res : list) {
-		        	final CropOption co = new CropOption();
-		        	
-		        	co.title 	= getPackageManager().getApplicationLabel(res.activityInfo.applicationInfo);
-		        	co.icon		= getPackageManager().getApplicationIcon(res.activityInfo.applicationInfo);
-		        	co.appIntent= new Intent(intent);
-		        	
-		        	co.appIntent.setComponent( new ComponentName(res.activityInfo.packageName, res.activityInfo.name));
-		        	
-		            cropOptions.add(co);
-		        }
-		        Log.e("From Gallary", "croping");
-		        CropOptionAdapter adapter = new CropOptionAdapter(getApplicationContext(), cropOptions);
-		        
-		        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-		        builder.setTitle("Choose Crop App");
-		        builder.setAdapter( adapter, new DialogInterface.OnClickListener() {
-		            public void onClick( DialogInterface dialog, int item ) {
-		                startActivityForResult( cropOptions.get(item).appIntent, CROP_FROM_CAMERA);
-		            }
-		        });
-	        
-		        builder.setOnCancelListener( new DialogInterface.OnCancelListener() {
-		            @Override
-		            public void onCancel( DialogInterface dialog ) {
-		               
-		                if (mImageCaptureUri != null ) {
-		                    getContentResolver().delete(mImageCaptureUri, null, null );
-		                    mImageCaptureUri = null;
-		                }
-		            }
-		        } );
-		        
-		        AlertDialog alert = builder.create();
-		        
-		        alert.show();
-        	}
-        }
-	}
-    @Override
-	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-	    if (resultCode != RESULT_OK) return;
-	    switch (requestCode) {
-		    case PICK_FROM_CAMERA:
-		    	doCrop();
-		    	
-		    	break;
-		    	
-		    case PICK_FROM_FILE: 
-		    	mImageCaptureUri = data.getData();
-		    	doCrop();
-	    
-		    	break;	    	
-	    
-		    case CROP_FROM_CAMERA:	    	
-		        Bundle extras = data.getExtras();
-	
-		        if (extras != null) {	        	
-		            Bitmap photo = extras.getParcelable("data");
-		            
-		            picImage.setImageBitmap(photo);
-		        }
-	
-		        File f = new File(mImageCaptureUri.getPath());            
-		        
-		        if (f.exists()) f.delete();
-	
-		        break;
-
-	    }
-	}
 
 	@Override
 	public void onPreviewFrame(byte[] data, Camera camera) {
